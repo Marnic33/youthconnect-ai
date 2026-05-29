@@ -502,12 +502,28 @@ function HourGrid({ value, onToggle, color }) {
 
 function PublicForm({ onSubmit }) {
   const [form, setForm] = useState({
-    name:"", age:"", address:"", livesWithParents:true, status:"studying", course:"",
+    name:"", age:"", livesWithParents:true, status:"studying", course:"",
     skillsRaw:"", seekingJob:false, transport:"",
+    cep:"", number:"", street:"", neighborhood:"", city:"", uf:"",
     studyHours:{}, workHours:{}
   });
   const [sent, setSent] = useState(false);
+  const [cepStatus, setCepStatus] = useState("");
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  // Busca endereço pelo CEP (ViaCEP - gratuito)
+  async function lookupCep(rawCep) {
+    const cep = rawCep.replace(/\D/g, "");
+    if (cep.length !== 8) return;
+    setCepStatus("Buscando...");
+    try {
+      const r = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      const d = await r.json();
+      if (d.erro) { setCepStatus("CEP não encontrado"); return; }
+      setForm(f => ({ ...f, street:d.logradouro||"", neighborhood:d.bairro||"", city:d.localidade||"", uf:d.uf||"" }));
+      setCepStatus("✓ Endereço encontrado");
+    } catch (e) { setCepStatus("Erro ao buscar CEP"); }
+  }
 
   // Alterna disponibilidade de um período em um dia (estudo ou trabalho)
   function toggleHour(type, dayKey, period) {
@@ -524,8 +540,13 @@ function PublicForm({ onSubmit }) {
   async function handleSubmit() {
     if (!form.name || !form.age) return;
     const initials = form.name.split(" ").slice(0,2).map(w=>w[0].toUpperCase()).join("");
+    // Monta endereço completo para o mapa
+    const fullAddress = [
+      form.street, form.number, form.neighborhood, form.city, form.uf, form.cep
+    ].filter(Boolean).join(", ");
     const entry = {
-      id: "p" + Date.now(), name:form.name, age:Number(form.age), address:form.address,
+      id: "p" + Date.now(), name:form.name, age:Number(form.age), address:fullAddress,
+      cep:form.cep, number:form.number,
       livesWithParents:form.livesWithParents, status:form.status, course:form.course,
       skills: form.skillsRaw.split(",").map(s=>s.trim()).filter(Boolean),
       studyHours:form.studyHours, workHours:form.workHours, seekingJob:form.seekingJob,
@@ -575,8 +596,18 @@ function PublicForm({ onSubmit }) {
           </div>
         </div>
         <div>
-          <label style={label}>Endereço</label>
-          <input value={form.address} onChange={e=>set("address",e.target.value)} placeholder="Rua, Número, Bairro" style={input} />
+          <label style={label}>CEP</label>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <input value={form.cep} onChange={e=>set("cep",e.target.value)} onBlur={e=>lookupCep(e.target.value)}
+              placeholder="00000-000" style={input} inputMode="numeric" />
+            <input value={form.number} onChange={e=>set("number",e.target.value)} placeholder="Número" style={input} />
+          </div>
+          {cepStatus && <p style={{ color: cepStatus.startsWith("✓") ? "#6EE7B7" : "#94a3b8", fontSize:12, marginTop:6 }}>{cepStatus}</p>}
+          {form.street && (
+            <p style={{ color:"#64748b", fontSize:13, marginTop:8 }}>
+              📍 {form.street}{form.neighborhood ? `, ${form.neighborhood}` : ""} — {form.city}/{form.uf}
+            </p>
+          )}
         </div>
         <div>
           <label style={label}>Curso ou Área</label>
@@ -821,8 +852,9 @@ function TalentsModule({ youth, jobs, setJobs }) {
 }
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
-function SettingsModule({ customFields, setCustomFields }) {
+function SettingsModule({ customFields, setCustomFields, church, setChurch }) {
   const [newLabel, setNewLabel] = useState("");
+  const [cepStatus, setCepStatus] = useState("");
 
   function addField() {
     if (!newLabel.trim()) return;
@@ -836,9 +868,40 @@ function SettingsModule({ customFields, setCustomFields }) {
     setCustomFields(customFields.filter(f=>f.key!==key));
   }
 
+  async function lookupChurchCep(rawCep) {
+    const cep = rawCep.replace(/\D/g, "");
+    if (cep.length !== 8) return;
+    setCepStatus("Buscando...");
+    try {
+      const r = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      const d = await r.json();
+      if (d.erro) { setCepStatus("CEP não encontrado"); return; }
+      setChurch({ ...church, cep, street:d.logradouro||"", neighborhood:d.bairro||"", city:d.localidade||"", uf:d.uf||"", lat:null, lng:null });
+      setCepStatus("✓ Endereço encontrado");
+    } catch (e) { setCepStatus("Erro ao buscar CEP"); }
+  }
+
+  const inp = { background:"#1e293b", border:"1px solid #334155", borderRadius:10, padding:"12px 14px", color:"#f1f5f9", fontSize:14, outline:"none", width:"100%", boxSizing:"border-box" };
+
   return (
     <div style={{ maxWidth:600 }}>
-      <h2 style={{ color:"#f1f5f9", fontWeight:800, fontSize:20, marginBottom:20 }}>⚙️ Campos Customizados da Ficha</h2>
+      {/* Endereço da igreja */}
+      <h2 style={{ color:"#f1f5f9", fontWeight:800, fontSize:20, marginBottom:8 }}>⛪ Endereço da Igreja</h2>
+      <p style={{ color:"#64748b", fontSize:14, marginBottom:16 }}>Usado para calcular a distância de cada jovem no Mapa.</p>
+      <div style={{ background:"#1e293b", borderRadius:14, padding:20, marginBottom:32 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+          <input value={church.cep||""} onChange={e=>setChurch({...church, cep:e.target.value})} onBlur={e=>lookupChurchCep(e.target.value)} placeholder="CEP" style={inp} inputMode="numeric" />
+          <input value={church.number||""} onChange={e=>setChurch({...church, number:e.target.value})} placeholder="Número" style={inp} />
+        </div>
+        {cepStatus && <p style={{ color: cepStatus.startsWith("✓") ? "#6EE7B7" : "#94a3b8", fontSize:12, marginTop:8 }}>{cepStatus}</p>}
+        {church.street && (
+          <p style={{ color:"#94a3b8", fontSize:13, marginTop:10 }}>
+            📍 {church.street}{church.number ? `, ${church.number}` : ""}{church.neighborhood ? `, ${church.neighborhood}` : ""} — {church.city}/{church.uf}
+          </p>
+        )}
+      </div>
+
+      <h2 style={{ color:"#f1f5f9", fontWeight:800, fontSize:20, marginBottom:8 }}>⚙️ Campos Customizados da Ficha</h2>
       <p style={{ color:"#64748b", fontSize:14, marginBottom:24 }}>Crie campos personalizados que aparecerão na ficha de todos os jovens.</p>
 
       <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:24 }}>
@@ -1053,7 +1116,7 @@ export default function App() {
 }
 
 // ─── MAPA DOS JOVENS (Leaflet via CDN, geocoding gratuito) ───
-function MapModule({ youth }) {
+function MapModule({ youth, church }) {
   const mapRef = useRef(null);
   const [status, setStatus] = useState("Carregando mapa...");
   const [located, setLocated] = useState(0);
@@ -1079,7 +1142,7 @@ function MapModule({ youth }) {
 
     async function geocode(address) {
       try {
-        const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(address);
+        const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=" + encodeURIComponent(address);
         const r = await fetch(url, { headers: { "Accept-Language": "pt-BR" } });
         const d = await r.json();
         if (d && d[0]) return [parseFloat(d[0].lat), parseFloat(d[0].lon)];
@@ -1087,20 +1150,44 @@ function MapModule({ youth }) {
       return null;
     }
 
+    // Distância em linha reta (Haversine) em km
+    function distanceKm(a, b) {
+      const R = 6371, rad = Math.PI/180;
+      const dLat = (b[0]-a[0])*rad, dLng = (b[1]-a[1])*rad;
+      const lat1 = a[0]*rad, lat2 = b[0]*rad;
+      const x = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
+      return (R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x)));
+    }
+
     async function init() {
       const L = await loadLeaflet();
       if (cancelled || !mapRef.current) return;
-      // Centro padrão: São Paulo (ajuste se quiser)
       const map = L.map(mapRef.current).setView([-23.55, -46.63], 11);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "© OpenStreetMap", maxZoom: 19
       }).addTo(map);
 
+      const bounds = [];
+
+      // Geocodifica a igreja primeiro
+      let churchCoords = null;
+      const churchAddr = church && church.street
+        ? [church.street, church.number, church.neighborhood, church.city, church.uf, church.cep].filter(Boolean).join(", ")
+        : "";
+      if (churchAddr) {
+        churchCoords = await geocode(churchAddr);
+        if (churchCoords) {
+          bounds.push(churchCoords);
+          const churchIcon = L.divIcon({ html:'<div style="font-size:28px">⛪</div>', className:"", iconSize:[28,28], iconAnchor:[14,14] });
+          L.marker(churchCoords, { icon: churchIcon }).addTo(map).bindPopup("<b>⛪ Igreja</b><br>" + churchAddr);
+        }
+        await new Promise(res => setTimeout(res, 1100));
+      }
+
       const withAddress = youth.filter(y => y.address && y.address.trim());
-      if (withAddress.length === 0) { setStatus("Nenhum jovem com endereço cadastrado."); return; }
+      if (withAddress.length === 0 && !churchCoords) { setStatus("Nenhum endereço cadastrado ainda."); return; }
 
       setStatus("Localizando endereços...");
-      const bounds = [];
       let count = 0;
       for (const y of withAddress) {
         if (cancelled) return;
@@ -1108,18 +1195,23 @@ function MapModule({ youth }) {
         if (coords) {
           count++; setLocated(count);
           bounds.push(coords);
+          let distInfo = "";
+          if (churchCoords) {
+            const km = distanceKm(churchCoords, coords);
+            distInfo = `<br>📏 <b>${km.toFixed(1)} km</b> da igreja`;
+          }
           L.marker(coords).addTo(map)
-            .bindPopup(`<b>${y.name}</b><br>${y.address}<br>${y.transport ? "🚌 " + y.transport : ""}`);
+            .bindPopup(`<b>${y.name}</b><br>${y.address}<br>${y.transport ? "🚌 " + y.transport : ""}${distInfo}`);
         }
-        await new Promise(res => setTimeout(res, 1100)); // respeita limite do Nominatim
+        await new Promise(res => setTimeout(res, 1100));
       }
       if (bounds.length) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
-      setStatus(count > 0 ? "" : "Não foi possível localizar os endereços.");
+      setStatus(churchCoords ? "" : "⚠️ Cadastre o endereço da igreja em Configurações para ver as distâncias.");
     }
 
     init();
     return () => { cancelled = true; };
-  }, [youth]);
+  }, [youth, church]);
 
   return (
     <div>
@@ -1129,7 +1221,7 @@ function MapModule({ youth }) {
       </div>
       {status && <p style={{ color:"#94a3b8", fontSize:13, marginBottom:12 }}>{status}</p>}
       <div ref={mapRef} style={{ width:"100%", height:520, borderRadius:14, overflow:"hidden", border:"1px solid #334155" }} />
-      <p style={{ color:"#64748b", fontSize:11, marginTop:10 }}>Os endereços são localizados automaticamente. A precisão depende de quão completo o jovem preencheu o endereço (rua, número, cidade).</p>
+      <p style={{ color:"#64748b", fontSize:11, marginTop:10 }}>Clique num pino para ver o nome, transporte e distância até a igreja. A distância é calculada em linha reta.</p>
     </div>
   );
 }
@@ -1140,6 +1232,7 @@ function AdminApp() {
   const [pending, setPending] = useLS("yc_pending", SEED_PENDING);
   const [jobs, setJobs] = useLS("yc_jobs", SEED_JOBS);
   const [customFields, setCustomFields] = useLS("yc_custom_fields", []);
+  const [church, setChurch] = useLS("yc_church", { cep:"", number:"", street:"", neighborhood:"", city:"", uf:"" });
   const [page, setPage] = useState("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -1258,9 +1351,9 @@ function AdminApp() {
           {page === "register" && <ShareLinkPanel />}
           {page === "approvals" && <ApprovalsModule pending={pending} setPending={setPending} youth={youth} setYouth={setYouthAndUpdate} onRefresh={syncFromSheets} syncing={syncing} />}
           {page === "talents" && <TalentsModule youth={approvedYouth} jobs={jobs} setJobs={setJobs} />}
-          {page === "map" && <MapModule youth={approvedYouth} />}
+          {page === "map" && <MapModule youth={approvedYouth} church={church} />}
           {page === "ai" && <AIChat youth={approvedYouth} jobs={jobs} />}
-          {page === "settings" && <SettingsModule customFields={customFields} setCustomFields={setCustomFields} />}
+          {page === "settings" && <SettingsModule customFields={customFields} setCustomFields={setCustomFields} church={church} setChurch={setChurch} />}
         </div>
       </div>
     </div>
