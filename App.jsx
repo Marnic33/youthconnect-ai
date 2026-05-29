@@ -972,19 +972,20 @@ Use emojis e formatação markdown para tornar a resposta mais visual. Seja prá
     `.trim();
 
     try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      const resp = await fetch("/api/chat", {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:1000,
           system: context,
           messages: newMessages.map(m=>({ role:m.role, content:m.content }))
         })
       });
       const data = await resp.json();
-      const reply = data.content?.find(b=>b.type==="text")?.text || "Desculpe, não consegui processar.";
-      setMessages(prev => [...prev, { role:"assistant", content:reply }]);
+      if (!resp.ok) {
+        setMessages(prev => [...prev, { role:"assistant", content:"⚠️ " + (data.error || "Erro ao conectar com a IA.") }]);
+      } else {
+        setMessages(prev => [...prev, { role:"assistant", content: data.reply }]);
+      }
     } catch(e) {
       setMessages(prev => [...prev, { role:"assistant", content:"⚠️ Erro ao conectar com a IA. Verifique a conexão." }]);
     }
