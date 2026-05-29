@@ -903,7 +903,70 @@ Use emojis e formatação markdown para tornar a resposta mais visual. Seja prá
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
+
+// Formulário público standalone (rota ?cadastro)
+function PublicFormPage() {
+  return (
+    <div style={{ minHeight:"100vh", background:"#0f172a", fontFamily:"'DM Sans', system-ui, sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&display=swap');
+        * { box-sizing:border-box; margin:0; padding:0; }
+      `}</style>
+      <PublicForm onSubmit={entry => { apiPost({ action:"register", youth: entry }).catch(()=>{}); }} />
+    </div>
+  );
+}
+
+// Painel interno: mostra e copia o link público
+function ShareLinkPanel() {
+  const [copied, setCopied] = useState(false);
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const link = base + "/?cadastro";
+
+  function copy() {
+    navigator.clipboard?.writeText(link);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div style={{ maxWidth:560, margin:"0 auto" }}>
+      <div style={{ background:"#1e293b", borderRadius:16, padding:28, textAlign:"center" }}>
+        <div style={{ fontSize:40, marginBottom:12 }}>🔗</div>
+        <h2 style={{ color:"#f1f5f9", fontWeight:800, fontSize:20, marginBottom:8 }}>Link Público de Cadastro</h2>
+        <p style={{ color:"#94a3b8", fontSize:14, marginBottom:24 }}>Compartilhe este link com os jovens. Eles preenchem o formulário e o cadastro chega na aba <strong style={{color:"#6EE7B7"}}>Aprovações</strong>.</p>
+
+        <div style={{ background:"#0f172a", border:"1px solid #334155", borderRadius:10, padding:"14px 16px", marginBottom:16, wordBreak:"break-all", color:"#6EE7B7", fontSize:14, fontFamily:"monospace" }}>
+          {link}
+        </div>
+
+        <button onClick={copy} style={{ width:"100%", background: copied ? "#34D399" : "linear-gradient(135deg,#6EE7B7,#3B82F6)", color:"#0f172a", border:"none", borderRadius:12, padding:"14px", fontWeight:800, fontSize:16, cursor:"pointer", transition:"all 0.2s" }}>
+          {copied ? "✅ Link copiado!" : "📋 Copiar Link"}
+        </button>
+
+        <div style={{ marginTop:20, display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap" }}>
+          <a href={`https://wa.me/?text=${encodeURIComponent("Faça seu cadastro no grupo de jovens: " + link)}`} target="_blank" rel="noreferrer"
+            style={{ background:"#25D36622", color:"#25D366", border:"1px solid #25D36644", borderRadius:8, padding:"8px 18px", fontSize:13, fontWeight:600, textDecoration:"none" }}>
+            Compartilhar no WhatsApp
+          </a>
+          <a href={link} target="_blank" rel="noreferrer"
+            style={{ background:"#A78BFA22", color:"#A78BFA", border:"1px solid #A78BFA44", borderRadius:8, padding:"8px 18px", fontSize:13, fontWeight:600, textDecoration:"none" }}>
+            Abrir formulário
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const isPublicForm = typeof window !== "undefined" &&
+    (window.location.search.includes("cadastro") || window.location.hash.includes("cadastro"));
+  if (isPublicForm) return <PublicFormPage />;
+  return <AdminApp />;
+}
+
+function AdminApp() {
   initLS();
   const [youth, setYouth] = useLS("yc_youth", SEED_YOUTH);
   const [pending, setPending] = useLS("yc_pending", SEED_PENDING);
@@ -1018,15 +1081,7 @@ export default function App() {
         <div style={{ padding:24, maxWidth:1200 }}>
           {page === "dashboard" && <Dashboard youth={approvedYouth} />}
           {page === "members" && <MembersModule youth={approvedYouth} setYouth={setYouthAndUpdate} customFields={customFields} />}
-          {page === "register" && (
-            <div style={{ maxWidth:540, margin:"0 auto" }}>
-              <div style={{ background:"#1e293b", borderRadius:16, padding:4, marginBottom:20, display:"flex", alignItems:"center", gap:8 }}>
-                <span style={{ background:"#6EE7B722", color:"#6EE7B7", border:"1px solid #6EE7B733", borderRadius:8, padding:"6px 14px", fontSize:12, fontWeight:700 }}>🔗 /cadastro-jovem</span>
-                <span style={{ color:"#64748b", fontSize:12 }}>Link público do formulário</span>
-              </div>
-              <PublicForm onSubmit={entry => setPending([...pending, entry])} />
-            </div>
-          )}
+          {page === "register" && <ShareLinkPanel />}
           {page === "approvals" && <ApprovalsModule pending={pending} setPending={setPending} youth={youth} setYouth={setYouthAndUpdate} onRefresh={syncFromSheets} syncing={syncing} />}
           {page === "talents" && <TalentsModule youth={approvedYouth} jobs={jobs} setJobs={setJobs} />}
           {page === "ai" && <AIChat youth={approvedYouth} jobs={jobs} />}
