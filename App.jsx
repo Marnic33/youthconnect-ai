@@ -5,7 +5,7 @@ import {
 } from "recharts";
 
 // ─── GOOGLE SHEETS API ──────────────────────────────────────────────────────
-const SHEETS_API = "https://script.google.com/macros/s/AKfycbxNilLwy4UFAxltaVxnSD5ij_s6apgtMiUhmbfM7Tj1aw7JomN4AolNi5adxqOCSb3s/exec";
+const SHEETS_API = "https://script.google.com/macros/s/AKfycbzEQNgScSZSdcblz82c0dibvkAiNXs7OIYRRTP0HT3vA5fT6Gx1O8dFYoPz3IdYE4pN/exec";
 
 async function apiList() {
   try {
@@ -311,7 +311,7 @@ function YouthCard({ youth, onOpen }) {
 }
 
 // ─── YOUTH PROFILE MODAL ──────────────────────────────────────────────────────
-function YouthProfile({ youth, onClose, onUpdate, customFields }) {
+function YouthProfile({ youth, onClose, onUpdate, onDelete, customFields }) {
   const [tab, setTab] = useState("info");
   const [newNote, setNewNote] = useState("");
 
@@ -347,6 +347,7 @@ function YouthProfile({ youth, onClose, onUpdate, customFields }) {
         <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
           <InfoRow label="Mora com os pais" value={youth.livesWithParents ? "Sim" : "Não"} />
           <InfoRow label="Curso" value={youth.course} />
+          <InfoRow label="Transporte p/ igreja" value={youth.transport || "—"} />
           <InfoRow label="Buscando emprego" value={youth.seekingJob ? "Sim 🎯" : "Não"} />
           <div>
             <div style={{ color:"#64748b", fontSize:12, marginBottom:6 }}>HABILIDADES</div>
@@ -357,6 +358,10 @@ function YouthProfile({ youth, onClose, onUpdate, customFields }) {
           {customFields.map(cf => (
             <InfoRow key={cf.key} label={cf.label} value={youth.customFields?.[cf.key] || "—"} />
           ))}
+          <button onClick={() => { if (confirm(`Remover ${youth.name} do cadastro? Esta ação não pode ser desfeita.`)) onDelete(youth); }}
+            style={{ marginTop:8, background:"#ef444415", color:"#ef4444", border:"1px solid #ef444444", borderRadius:10, padding:"10px", cursor:"pointer", fontWeight:600, fontSize:13 }}>
+            🗑️ Excluir este jovem
+          </button>
         </div>
       )}
 
@@ -409,7 +414,7 @@ function InfoRow({ label, value }) {
 }
 
 // ─── YOUTH LIST (Members module) ──────────────────────────────────────────────
-function MembersModule({ youth, setYouth, customFields }) {
+function MembersModule({ youth, setYouth, customFields, onDeleteYouth }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [selected, setSelected] = useState(null);
@@ -425,6 +430,11 @@ function MembersModule({ youth, setYouth, customFields }) {
     const list = youth.map(y => y.id === updated.id ? updated : y);
     setYouth(list);
     setSelected(updated);
+  }
+
+  function handleDelete(y) {
+    onDeleteYouth(y);
+    setSelected(null);
   }
 
   return (
@@ -443,21 +453,73 @@ function MembersModule({ youth, setYouth, customFields }) {
       </div>
       {filtered.length === 0 && <p style={{ color:"#64748b", textAlign:"center", marginTop:40 }}>Nenhum jovem encontrado.</p>}
       <Modal open={!!selected} onClose={()=>setSelected(null)} title="Ficha do Jovem">
-        {selected && <YouthProfile youth={selected} onClose={()=>setSelected(null)} onUpdate={updateYouth} customFields={customFields} />}
+        {selected && <YouthProfile youth={selected} onClose={()=>setSelected(null)} onUpdate={updateYouth} onDelete={handleDelete} customFields={customFields} />}
       </Modal>
     </div>
   );
 }
 
 // ─── PUBLIC REGISTRATION FORM ─────────────────────────────────────────────────
+// Grade de seleção de disponibilidade por período × dia
+function HourGrid({ value, onToggle, color }) {
+  const dayKeys = ["mon","tue","wed","thu","fri","sat","sun"];
+  const dayLabels = ["Seg","Ter","Qua","Qui","Sex","Sáb","Dom"];
+  const periods = [["M","Manhã"],["T","Tarde"],["N","Noite"]];
+  return (
+    <div style={{ overflowX:"auto" }}>
+      <table style={{ borderCollapse:"separate", borderSpacing:4, width:"100%" }}>
+        <thead>
+          <tr>
+            <th></th>
+            {dayLabels.map(d => <th key={d} style={{ color:"#64748b", fontSize:11, fontWeight:600, paddingBottom:4 }}>{d}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {periods.map(([pk, plabel]) => (
+            <tr key={pk}>
+              <td style={{ color:"#64748b", fontSize:11, paddingRight:6, whiteSpace:"nowrap" }}>{plabel}</td>
+              {dayKeys.map(dk => {
+                const active = (value[dk] || "").split(",").includes(pk);
+                return (
+                  <td key={dk}>
+                    <button type="button" onClick={()=>onToggle(dk, pk)}
+                      style={{ width:"100%", minWidth:34, height:30, borderRadius:6, cursor:"pointer",
+                        border: active ? `1px solid ${color}` : "1px solid #334155",
+                        background: active ? color : "#0f172a",
+                        color: active ? "#0f172a" : "#475569", fontSize:11, fontWeight:700 }}>
+                      {active ? "✓" : ""}
+                    </button>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function PublicForm({ onSubmit }) {
   const [form, setForm] = useState({
     name:"", age:"", address:"", livesWithParents:true, status:"studying", course:"",
-    skillsRaw:"", studyMorning:false, studyAfternoon:false, studyNight:false,
-    workMorning:false, workAfternoon:false, workNight:false, seekingJob:false
+    skillsRaw:"", seekingJob:false, transport:"",
+    studyHours:{}, workHours:{}
   });
   const [sent, setSent] = useState(false);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  // Alterna disponibilidade de um período em um dia (estudo ou trabalho)
+  function toggleHour(type, dayKey, period) {
+    setForm(f => {
+      const hours = { ...(f[type] || {}) };
+      const slots = new Set((hours[dayKey] || "").split(",").filter(Boolean));
+      if (slots.has(period)) slots.delete(period); else slots.add(period);
+      if (slots.size === 0) delete hours[dayKey];
+      else hours[dayKey] = [...slots].join(",");
+      return { ...f, [type]: hours };
+    });
+  }
 
   async function handleSubmit() {
     if (!form.name || !form.age) return;
@@ -466,7 +528,8 @@ function PublicForm({ onSubmit }) {
       id: "p" + Date.now(), name:form.name, age:Number(form.age), address:form.address,
       livesWithParents:form.livesWithParents, status:form.status, course:form.course,
       skills: form.skillsRaw.split(",").map(s=>s.trim()).filter(Boolean),
-      studyHours:{}, workHours:{}, seekingJob:form.seekingJob,
+      studyHours:form.studyHours, workHours:form.workHours, seekingJob:form.seekingJob,
+      transport:form.transport,
       avatar: initials || "??", timeline:[], customFields:{}, approved:false
     };
     setSent(true);
@@ -531,6 +594,29 @@ function PublicForm({ onSubmit }) {
         <div style={{ display:"flex", alignItems:"center", gap:10, background:"#1e293b", borderRadius:10, padding:"12px 14px" }}>
           <input type="checkbox" id="seeking" checked={form.seekingJob} onChange={e=>set("seekingJob",e.target.checked)} style={{ accentColor:"#FCD34D", width:16, height:16 }} />
           <label htmlFor="seeking" style={{ color:"#94a3b8", fontSize:14, cursor:"pointer" }}>Estou buscando emprego/estágio</label>
+        </div>
+
+        <div>
+          <label style={label}>Como você vai para a igreja?</label>
+          <select value={form.transport} onChange={e=>set("transport",e.target.value)} style={input}>
+            <option value="">Selecione...</option>
+            <option value="A pé">A pé</option>
+            <option value="Transporte público">Transporte público (ônibus/metrô)</option>
+            <option value="Com os pais">Com os pais / familiares</option>
+            <option value="Carro próprio">Carro próprio / moto</option>
+            <option value="Carona">Carona com amigos</option>
+            <option value="Outro">Outro</option>
+          </select>
+        </div>
+
+        <div>
+          <label style={label}>📚 Horários de Aula (toque nos períodos ocupados)</label>
+          <HourGrid value={form.studyHours} onToggle={(d,p)=>toggleHour("studyHours",d,p)} color="#60A5FA" />
+        </div>
+
+        <div>
+          <label style={label}>💼 Horários de Trabalho (toque nos períodos ocupados)</label>
+          <HourGrid value={form.workHours} onToggle={(d,p)=>toggleHour("workHours",d,p)} color="#A78BFA" />
         </div>
 
         <button onClick={handleSubmit} style={{ background:"linear-gradient(135deg,#6EE7B7,#3B82F6)", color:"#0f172a", border:"none", borderRadius:12, padding:"14px", fontWeight:800, fontSize:16, cursor:"pointer", marginTop:8 }}>
@@ -966,6 +1052,88 @@ export default function App() {
   return <AdminApp />;
 }
 
+// ─── MAPA DOS JOVENS (Leaflet via CDN, geocoding gratuito) ───
+function MapModule({ youth }) {
+  const mapRef = useRef(null);
+  const [status, setStatus] = useState("Carregando mapa...");
+  const [located, setLocated] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    function loadLeaflet() {
+      return new Promise((resolve) => {
+        if (window.L) return resolve(window.L);
+        if (!document.querySelector('link[href*="leaflet"]')) {
+          const css = document.createElement("link");
+          css.rel = "stylesheet";
+          css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+          document.head.appendChild(css);
+        }
+        const s = document.createElement("script");
+        s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+        s.onload = () => resolve(window.L);
+        document.body.appendChild(s);
+      });
+    }
+
+    async function geocode(address) {
+      try {
+        const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(address);
+        const r = await fetch(url, { headers: { "Accept-Language": "pt-BR" } });
+        const d = await r.json();
+        if (d && d[0]) return [parseFloat(d[0].lat), parseFloat(d[0].lon)];
+      } catch (e) {}
+      return null;
+    }
+
+    async function init() {
+      const L = await loadLeaflet();
+      if (cancelled || !mapRef.current) return;
+      // Centro padrão: São Paulo (ajuste se quiser)
+      const map = L.map(mapRef.current).setView([-23.55, -46.63], 11);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap", maxZoom: 19
+      }).addTo(map);
+
+      const withAddress = youth.filter(y => y.address && y.address.trim());
+      if (withAddress.length === 0) { setStatus("Nenhum jovem com endereço cadastrado."); return; }
+
+      setStatus("Localizando endereços...");
+      const bounds = [];
+      let count = 0;
+      for (const y of withAddress) {
+        if (cancelled) return;
+        const coords = await geocode(y.address);
+        if (coords) {
+          count++; setLocated(count);
+          bounds.push(coords);
+          L.marker(coords).addTo(map)
+            .bindPopup(`<b>${y.name}</b><br>${y.address}<br>${y.transport ? "🚌 " + y.transport : ""}`);
+        }
+        await new Promise(res => setTimeout(res, 1100)); // respeita limite do Nominatim
+      }
+      if (bounds.length) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+      setStatus(count > 0 ? "" : "Não foi possível localizar os endereços.");
+    }
+
+    init();
+    return () => { cancelled = true; };
+  }, [youth]);
+
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
+        <h2 style={{ color:"#f1f5f9", fontWeight:800, fontSize:20, margin:0 }}>🗺️ Mapa dos Jovens</h2>
+        <span style={{ color:"#64748b", fontSize:13 }}>{located} de {youth.filter(y=>y.address).length} localizados</span>
+      </div>
+      {status && <p style={{ color:"#94a3b8", fontSize:13, marginBottom:12 }}>{status}</p>}
+      <div ref={mapRef} style={{ width:"100%", height:520, borderRadius:14, overflow:"hidden", border:"1px solid #334155" }} />
+      <p style={{ color:"#64748b", fontSize:11, marginTop:10 }}>Os endereços são localizados automaticamente. A precisão depende de quão completo o jovem preencheu o endereço (rua, número, cidade).</p>
+    </div>
+  );
+}
+
 function AdminApp() {
   initLS();
   const [youth, setYouth] = useLS("yc_youth", SEED_YOUTH);
@@ -985,12 +1153,12 @@ function AdminApp() {
     // Jovens aprovados na planilha
     const remoteApproved = remote.filter(r => r.approved).map(r => ({
       ...r, avatar: r.name.split(" ").slice(0,2).map(w=>w[0]?.toUpperCase()).join(""),
-      studyHours:{}, workHours:{}, timeline:[], customFields:{}
+      studyHours: r.studyHours || {}, workHours: r.workHours || {}, timeline:[], customFields:{}
     }));
     // Pendentes na planilha (ainda não aprovados)
     const remotePending = remote.filter(r => !r.approved).map(r => ({
       ...r, avatar: r.name.split(" ").slice(0,2).map(w=>w[0]?.toUpperCase()).join(""),
-      studyHours:{}, workHours:{}, timeline:[], customFields:{}
+      studyHours: r.studyHours || {}, workHours: r.workHours || {}, timeline:[], customFields:{}
     }));
     // Mescla: mantém seeds locais + dados da nuvem (sem duplicar por id)
     setYouth(prev => {
@@ -1014,12 +1182,18 @@ function AdminApp() {
     { key:"register", icon:"📝", label:"Auto-Cadastro" },
     { key:"approvals", icon:"⏳", label:"Aprovações", badge: pending.length },
     { key:"talents", icon:"🌟", label:"Talentos & Vagas" },
+    { key:"map", icon:"🗺️", label:"Mapa" },
     { key:"ai", icon:"🤖", label:"Chat IA" },
     { key:"settings", icon:"⚙️", label:"Configurações" },
   ];
 
   function setYouthAndUpdate(list) {
     setYouth(list);
+  }
+
+  async function deleteYouth(y) {
+    setYouth(youth.filter(x => x.id !== y.id));
+    if (String(y.id).startsWith("y")) await apiPost({ action:"delete", id:y.id });
   }
 
   return (
@@ -1080,10 +1254,11 @@ function AdminApp() {
       <div style={{ marginLeft:220, paddingTop:56 }}>
         <div style={{ padding:24, maxWidth:1200 }}>
           {page === "dashboard" && <Dashboard youth={approvedYouth} />}
-          {page === "members" && <MembersModule youth={approvedYouth} setYouth={setYouthAndUpdate} customFields={customFields} />}
+          {page === "members" && <MembersModule youth={approvedYouth} setYouth={setYouthAndUpdate} customFields={customFields} onDeleteYouth={deleteYouth} />}
           {page === "register" && <ShareLinkPanel />}
           {page === "approvals" && <ApprovalsModule pending={pending} setPending={setPending} youth={youth} setYouth={setYouthAndUpdate} onRefresh={syncFromSheets} syncing={syncing} />}
           {page === "talents" && <TalentsModule youth={approvedYouth} jobs={jobs} setJobs={setJobs} />}
+          {page === "map" && <MapModule youth={approvedYouth} />}
           {page === "ai" && <AIChat youth={approvedYouth} jobs={jobs} />}
           {page === "settings" && <SettingsModule customFields={customFields} setCustomFields={setCustomFields} />}
         </div>
